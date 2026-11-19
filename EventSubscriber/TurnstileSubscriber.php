@@ -1,6 +1,7 @@
 <?php
 declare(strict_types=1);
 namespace Plugin\PasskeySecurity\EventSubscriber;
+use Plugin\PasskeySecurity\Resource\Runtime\StorePresentation;
 use Plugin\PasskeySecurity\Resource\Turnstile\{Configuration,Verifier,Routes,RegistrationFlow,VisitPage,SearchCrawler};
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
 use Symfony\Component\HttpKernel\Event\{RequestEvent,ResponseEvent};
@@ -9,7 +10,7 @@ use Symfony\Component\HttpFoundation\{Response,JsonResponse};
 use Symfony\Component\Routing\{RouterInterface,Matcher\UrlMatcher};
 final class TurnstileSubscriber implements EventSubscriberInterface
 {
-    public function __construct(private \Plugin\PasskeySecurity\Resource\Runtime\Config $compatibility, private Configuration $config,private Verifier $verifier,private RouterInterface $router,private ?\Symfony\Component\Security\Csrf\CsrfTokenManagerInterface $csrf=null,private ?\Symfony\Component\Security\Core\Authentication\Token\Storage\TokenStorageInterface $tokens=null,private ?\Plugin\PasskeySecurity\Resource\Runtime\Policy $policy=null){}
+    public function __construct(private \Plugin\PasskeySecurity\Resource\Runtime\Config $compatibility, private Configuration $config,private Verifier $verifier,private RouterInterface $router,private StorePresentation $presentation,private ?\Symfony\Component\Security\Csrf\CsrfTokenManagerInterface $csrf=null,private ?\Symfony\Component\Security\Core\Authentication\Token\Storage\TokenStorageInterface $tokens=null,private ?\Plugin\PasskeySecurity\Resource\Runtime\Policy $policy=null){}
     public static function getSubscribedEvents():array{return [KernelEvents::REQUEST=>[['guard',18],['guardStaff',6]],KernelEvents::RESPONSE=>['render',-900]];}
     private const STAFF_ROUTES=['ps_member','ps_staff_email_manage'];
     private function recentStaff(\Symfony\Component\HttpFoundation\Request $r,bool $requireFresh=true):bool
@@ -45,7 +46,7 @@ final class TurnstileSubscriber implements EventSubscriberInterface
                 $cfg=$this->config->data();
                 if($cfg['enabled'] && (!$r->hasSession() || $r->getSession()->get('ps_turnstile_visit_until',0)<time())){
                     if(!$this->csrf || !$r->hasSession())throw new \RuntimeException('visit_session_required');
-                    $response=new Response();VisitPage::apply($response,$cfg['site_key'],$this->router->generate('ps_turnstile_visit'),$this->csrf->getToken('ps_turnstile_visit')->getValue());
+                    $response=new Response();VisitPage::apply($response,$cfg['site_key'],$this->router->generate('ps_turnstile_visit'),$this->csrf->getToken('ps_turnstile_visit')->getValue(),$this->presentation->appearance());
                     $e->setResponse($response);return;
                 }
             }catch(\Throwable $error){$e->setResponse(new Response('安全確認を準備できませんでした。しばらくお待ちください。',503,['Cache-Control'=>'no-store, private']));return;}
@@ -67,7 +68,17 @@ final class TurnstileSubscriber implements EventSubscriberInterface
             if($this->verifier->check($token,$action)){if($action==='visit')$r->attributes->set('_ps_visit_verified',true);elseif($r->hasSession())$r->getSession()->set('ps_turnstile_visit_until',time()+1800);$r->request->remove('cf-turnstile-response');return;}
         }catch(\Throwable $error){}
         $message='安全確認を完了できませんでした。入力画面に戻り、チェックを確認してからもう一度お試しください。';
-        $response=str_contains($r->headers->get('Content-Type',''),'application/json')?new JsonResponse(['ok'=>false,'error'=>$message],403):new Response('<!doctype html><html lang="ja"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>安全確認 | PasskeySecurity</title><main><h1>安全確認をお願いします</h1><p>'.$message.'</p><p>ブラウザの「戻る」で入力画面へ戻れます。時間をおいても解消しない場合は店舗へお問い合わせください。</p></main></html>',403);
+        if (str_contains($r->headers->get('Content-Type', ''), 'application/json')) {
+            $response = new JsonResponse(['ok' => false, 'error' => $message], 403);
+        } else {
+            $appearance = $this->presentation->appearance();
+            $name = htmlspecialchars($appearance['name'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+            $favicon = $appearance['favicon'] === null ? '' : '<link rel="icon" href="'
+                .htmlspecialchars($appearance['favicon'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8').'">';
+            $response = new Response('<!doctype html><html lang="ja"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
+                .'<title>安全確認 | '.$name.'</title>'.$favicon.'<main><h1>安全確認をお願いします</h1><p>'.$message
+                .'</p><p>ブラウザの「戻る」で入力画面へ戻れます。時間をおいても解消しない場合は店舗へお問い合わせください。</p></main></html>', 403);
+        }
         $response->headers->set('Cache-Control','no-store, private');$response->headers->set('Referrer-Policy','no-referrer');$e->setResponse($response);
     }
     public function render(ResponseEvent $e):void
@@ -90,7 +101,7 @@ final class TurnstileSubscriber implements EventSubscriberInterface
             && (!str_starts_with($route,'admin_') || $route==='admin_login')){
             try{
                 if(!$this->csrf || !$request->hasSession())throw new \RuntimeException('visit_session_required');
-                VisitPage::apply($response,$cfg['site_key'],$this->router->generate('ps_turnstile_visit'),$this->csrf->getToken('ps_turnstile_visit')->getValue());
+                VisitPage::apply($response,$cfg['site_key'],$this->router->generate('ps_turnstile_visit'),$this->csrf->getToken('ps_turnstile_visit')->getValue(),$this->presentation->appearance());
             }catch(\Throwable $error){
                 $response->setStatusCode(503);$response->setContent('安全確認を準備できませんでした。しばらくお待ちください。');
                 $response->headers->set('Cache-Control','no-store, private');

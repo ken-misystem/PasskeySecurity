@@ -108,7 +108,7 @@ final class SettingsController extends AbstractController
         ]);
         if ($nonce !== '') {
             $response->headers->set('Content-Security-Policy',
-                "default-src 'none'; style-src 'nonce-$nonce'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'");
+                "default-src 'none'; style-src 'nonce-$nonce'; img-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'");
         }
         return $response;
     }

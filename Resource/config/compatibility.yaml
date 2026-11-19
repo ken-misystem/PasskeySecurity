@@ -11,6 +11,10 @@ services:
     Plugin\PasskeySecurity\Resource\Runtime\StaffMail: ~
     Plugin\PasskeySecurity\Resource\Runtime\StaffMailAdminAccess: ~
     Plugin\PasskeySecurity\Resource\Runtime\StaffMfaState: ~
+    Plugin\PasskeySecurity\Resource\Runtime\StorePresentation:
+        arguments:
+            $assets: '@assets.packages'
+            $publicDir: '%eccube_html_dir%'
     Plugin\PasskeySecurity\Resource\Turnstile\Configuration:
         arguments:
             $path: '%env(default:passkey_turnstile_config_default:TURNSTILE_CONFIG)%'

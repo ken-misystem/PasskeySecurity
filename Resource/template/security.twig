@@ -1,8 +1,8 @@
 {% set compact_customer_login = kind == 'customer' and not signed_in %}
 {% set compact_staff_login = kind == 'member' and ((staff_return|default(false)) or (not complete and (not signed_in or active_count > 0 or has_totp))) %}
-<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{{ compact_staff_login ? '管理画面にログイン' : 'ログインと認証設定' }} | PasskeySecurity</title>
+<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{{ compact_staff_login ? '管理画面にログイン' : 'ログインと認証設定' }} | {{ passkey_store_appearance().name }}</title>
 {% include '@PasskeySecurity/favicon.twig' %}{% include '@PasskeySecurity/security_style.twig' %}{% if compact_staff_login %}{% include '@PasskeySecurity/staff_login_style.twig' %}{% endif %}{% if compact_customer_login %}{% include '@PasskeySecurity/customer_login_style.twig' %}{% endif %}{% include '@PasskeySecurity/auth_compact_style.twig' %}</head>
-<body class="{{ compact_staff_login ? 'staff-login-page' : (compact_customer_login ? 'customer-login-page' : 'auth-compact-page') }}"><a class="skip" href="#main">操作へ移動</a><header class="topbar">PasskeySecurity <span>{{ compact_staff_login ? '管理画面ログイン' : (compact_customer_login ? '会員ログイン' : 'アカウントの安全設定') }}</span></header><main id="main">
+<body class="{{ compact_staff_login ? 'staff-login-page' : (compact_customer_login ? 'customer-login-page' : 'auth-compact-page') }}"><a class="skip" href="#main">操作へ移動</a><header class="topbar">{{ passkey_store_appearance().name }} <span>{{ compact_staff_login ? '管理画面ログイン' : (compact_customer_login ? '会員ログイン' : 'アカウントの安全設定') }}</span></header><main id="main">
 {% if staff_return|default(false) %}<p class="return-brief" id="return-notice">本人確認後、元のスタッフ設定へ戻ります。</p>{% endif %}
 {% if staff_initial|default(false) %}{% include '@PasskeySecurity/staff_onboarding.twig' %}
 {% elseif compact_staff_login %}{% include '@PasskeySecurity/staff_login.twig' %}

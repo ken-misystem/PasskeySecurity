@@ -23,7 +23,7 @@ final class PublicController extends AbstractController
     private function headers(Response $r,string $nonce=''):Response
     {
         foreach(['Cache-Control'=>'no-store, private','Referrer-Policy'=>'same-origin','X-Frame-Options'=>'DENY','X-Content-Type-Options'=>'nosniff']as$k=>$v)$r->headers->set($k,$v);
-        if($nonce!=='')$r->headers->set('Content-Security-Policy',"default-src 'none'; script-src 'nonce-$nonce'; style-src 'nonce-$nonce'; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'");
+        if($nonce!=='')$r->headers->set('Content-Security-Policy',"default-src 'none'; script-src 'nonce-$nonce'; style-src 'nonce-$nonce'; img-src 'self'; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'");
         return $r;
     }
     private function transientDatabaseResponse(bool $json=false):Response

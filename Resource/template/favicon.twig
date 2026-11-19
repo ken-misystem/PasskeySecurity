@@ -1,1 +1,2 @@
-<link rel="icon" type="image/x-icon" href="{{ asset('assets/img/common/favicon.ico', 'user_data') }}">
+{% set favicon = passkey_store_appearance().favicon %}
+{% if favicon %}<link rel="icon" type="image/x-icon" href="{{ favicon }}">{% endif %}
