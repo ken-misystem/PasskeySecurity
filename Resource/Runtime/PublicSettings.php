@@ -7,6 +7,8 @@ use Doctrine\DBAL\Connection;
 /** Public profile metadata only. No host-derived first-visit initialization. */
 final class PublicSettings
 {
+    public const STAFF_SESSION_HOURS = [1, 2, 3, 4, 5, 6];
+
     public function __construct(private Connection $db) {}
     public function get(string $name): ?string
     {
@@ -21,6 +23,7 @@ final class PublicSettings
     }
     public function ready():bool
     {
+        $this->assertShopEdition();
         $profile=$this->get('profile');
         if($profile!==null&&$profile!=='1')throw new \RuntimeException('public_profile_invalid');
         if($profile===null&&$this->db->fetchOne("SELECT value FROM plg_ps_meta WHERE name='epoch'")!==false)
@@ -30,8 +33,48 @@ final class PublicSettings
     public function required():bool
     {
         $v=$this->get('staff_required');
-        if(!in_array($v,['0','1'],true))throw new \RuntimeException('public_policy_invalid');
+        if(!in_array($v,['0','1'],true)||($v==='0'&&$this->migrated()))throw new \RuntimeException('public_policy_invalid');
         return $v==='1';
+    }
+    public function migrated(): bool { return $this->get('legacy_identity') !== null; }
+
+    public function staffSessionHours(): int
+    {
+        $hours = $this->get('staff_session_hours');
+        return $hours !== null && self::validStaffSessionHours($hours) ? (int) $hours : 1;
+    }
+
+    private static function validStaffSessionHours(string $hours): bool
+    {
+        return (string) (int) $hours === $hours && in_array((int) $hours, self::STAFF_SESSION_HOURS, true);
+    }
+
+    public function assertInstallable(): bool
+    {
+        // EC-CUBE can exclude plugin-owned tables from the ORM's schema inventory.
+        if ($this->db->createSchemaManager()->listTableColumns('plg_ps_meta') === []) {
+            if (class_exists(ShopEdition::class)) {
+                throw new \RuntimeException('legacy_shop_migration_required');
+            }
+            return false;
+        }
+        $this->assertShopEdition();
+        if (class_exists(ShopEdition::class) && $this->get('shop_edition') !== ShopEdition::ID) {
+            throw new \RuntimeException('public_migration_requires_review');
+        }
+        if ($this->get('profile') !== '1'
+            && $this->db->fetchOne("SELECT value FROM plg_ps_meta WHERE name='epoch'") !== false) {
+            throw new \RuntimeException('public_migration_requires_review');
+        }
+        return true;
+    }
+
+    private function assertShopEdition(): void
+    {
+        $edition = $this->get('shop_edition');
+        if ($edition !== null && !Config::supportsShopEdition($edition)) {
+            throw new \RuntimeException('legacy_shop_package_required');
+        }
     }
     public function install():void
     {
@@ -67,11 +110,23 @@ final class PublicSettings
             if(!$store->active())$store->activate([],[]);
         });
     }
-    public function save(string $origin,string $name,bool $required,Store $store):void
+    public function save(string $origin,string $name,bool $required,Store $store,?string $staffSessionHours=null):void
     {
-        $this->db->transactional(function()use($origin,$name,$required,$store):void{
+        if ($staffSessionHours !== null && !self::validStaffSessionHours($staffSessionHours)) {
+            throw new \DomainException('public_staff_session_hours_invalid');
+        }
+        $this->db->transactional(function()use($origin,$name,$required,$store,$staffSessionHours):void{
             $this->configure($origin,$name,$store);$this->requireStaff($required);
+            if ($staffSessionHours !== null) {
+                $this->put('staff_session_hours', $staffSessionHours);
+            }
         });
     }
-    public function requireStaff(bool $required):void { $this->put('staff_required',$required?'1':'0'); }
+    public function requireStaff(bool $required):void
+    {
+        if (!$required && $this->migrated()) {
+            throw new \RuntimeException('legacy_staff_factor_required');
+        }
+        $this->put('staff_required',$required?'1':'0');
+    }
 }
