@@ -5,7 +5,7 @@ namespace Plugin\PasskeySecurity\Controller;
 use Eccube\Controller\AbstractController;
 use Eccube\Entity\{Customer,Member};
 use Doctrine\ORM\EntityManagerInterface;
-use Plugin\PasskeySecurity\Resource\Runtime\{Config,Store,Policy,Ceremony,PublicSettings,PublicPolicy,ClockEventLog};
+use Plugin\PasskeySecurity\Resource\Runtime\{Config,Store,Policy,Ceremony,PublicSettings, SettingsContinuation,PublicPolicy,ClockEventLog};
 use Symfony\Component\HttpFoundation\{Request,Response,JsonResponse};
 use Symfony\Component\PasswordHasher\Hasher\UserPasswordHasherInterface;
 use Symfony\Component\Routing\Annotation\Route;
@@ -72,6 +72,8 @@ final class PublicController extends AbstractController
                 $f=$subject?$this->store->factor($subject):null;
                 return $this->headers($this->render('@PasskeySecurity/public_security.twig',['kind'=>$kind,'signed_in'=>$same,
                     'nonce'=>$nonce,'csrf_id'=>'ps_public_'.$kind,'endpoint'=>$r->getPathInfo(),
+                    'settings_return'=>$u instanceof Member&&SettingsContinuation::pending($r,$u,$this->policy)!==null,
+                    'staff_passkey_required'=>$kind==='member'&&$this->settings->staffPasskeyRequired(),
                     'home'=>$this->generateUrl($kind==='member'?'admin_homepage':'mypage'),
                     'login'=>$this->generateUrl($kind==='member'?'admin_login':'mypage_login'),
                     'rows'=>$subject?$this->store->inventory($subject):[],'totp'=>(int)($f['confirmed']??0)===1,
@@ -99,7 +101,7 @@ final class PublicController extends AbstractController
                 ||$this->store->resetRequired($v['subject']))throw new \RuntimeException('account_unavailable');
             $this->auth->authenticateUser($u,$kind==='member'?$this->memberAuthenticator:$this->customerAuthenticator,$r);
             $this->policy->prove($s,$u,'passkey',$now,$v['generation']);if($u instanceof Customer)$this->policy->prove($s,$u,'session',$now,$v['generation']);
-            return ['ok'=>true,'redirect'=>$this->generateUrl($kind==='member'?'admin_homepage':'mypage')];
+            return ['ok'=>true,'redirect'=>$u instanceof Member?$this->staffDestination($r,$u):$this->generateUrl('mypage')];
         }
         $u=$this->account($kind);$subject=Policy::subject($u);$generation=$this->store->generation($subject);
         $this->store->limit('public-account:'.$subject.':'.($a==='verify_totp'?'totp':'changes'),$now,10);
@@ -134,12 +136,13 @@ final class PublicController extends AbstractController
         if($a==='register_verify'){
             $this->publicPolicy->enrollment($s,$u,$now);$g=$this->ceremony->register($s,$kind,$subject,$i,$now);
             $this->policy->prove($s,$u,'passkey',$now,$g);if($u instanceof Member)$this->store->finishRecovery($subject,$g,$now);if($u instanceof Customer)$this->policy->prove($s,$u,'session',$now,$g);
-            return ['ok'=>true,'redirect'=>$r->getPathInfo()];
+            return ['ok'=>true,'redirect'=>$u instanceof Member&&SettingsContinuation::pending($r,$u,$this->policy)!==null
+                ?$this->staffDestination($r,$u):$r->getPathInfo()];
         }
         if($a==='verify_options'&&$u instanceof Member)return ['ok'=>true,'options'=>$this->ceremony->options($s,$kind,'assert',$subject,$now)];
         if($a==='verify_passkey'&&$u instanceof Member){
             $v=$this->ceremony->assertion($s,$kind,$subject,$i,$now);$this->policy->prove($s,$u,'passkey',$now,$v['generation']);
-            return ['ok'=>true,'redirect'=>$this->generateUrl('admin_homepage')];
+            return ['ok'=>true,'redirect'=>$this->staffDestination($r,$u)];
         }
         if($a==='totp_setup'&&$u instanceof Member){
             $g=$this->publicPolicy->enrollment($s,$u,$now);Config::dependencies();$f=$this->store->factor($subject);
@@ -152,12 +155,27 @@ final class PublicController extends AbstractController
         if($a==='verify_totp'&&$u instanceof Member){
             $g=$this->policy->proofGeneration($s,$u,'password',$now,300);
             $v=$this->store->consumeTotp($subject,(string)($i['code']??''),$now,$g);$this->policy->prove($s,$u,'totp',$now,$v);$this->store->finishRecovery($subject,$v,$now);$s->migrate(true);
-            return ['ok'=>true,'redirect'=>$this->generateUrl('admin_homepage')];
+            return ['ok'=>true,'redirect'=>$this->staffDestination($r,$u)];
         }
         if($a==='revoke'){
             $g=$this->publicPolicy->enrollment($s,$u,$now);$this->store->revokeOwn($subject,(string)($i['id']??''),$g,$now);
             Policy::clear($s);$s->migrate(true);return ['ok'=>true,'redirect'=>$r->getPathInfo()];
         }
         throw new \RuntimeException('action');
+    }
+
+    private function staffDestination(Request $request, Member $user): string
+    {
+        $pending = SettingsContinuation::pending($request, $user, $this->policy);
+        $passkeyRequired = $this->settings->staffPasskeyRequired();
+        if (($passkeyRequired && !$this->policy->staffAccess($request->getSession(), $user, time()))
+            || ($pending !== null && ($passkeyRequired || ($pending['settings']['passkey_required'] ?? false))
+                && !$this->policy->fresh($request->getSession(), $user, 'passkey', time(), 300))) {
+            return $this->generateUrl('ps_member');
+        }
+        if ($pending !== null) {
+            return $this->generateUrl(SettingsContinuation::ROUTE, ['resume' => '1']);
+        }
+        return $this->generateUrl('admin_homepage');
     }
 }

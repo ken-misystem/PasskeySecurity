@@ -285,7 +285,8 @@ final class Store
             if ((int)$f['generation']!==$expectedGeneration || !preg_match('/^[a-f0-9]{64}$/D',$id)) throw new \RuntimeException('security_revoke_rejected');
             $row=$this->db->fetchAssociative('SELECT id FROM plg_ps_credential WHERE id=? AND subject=? AND revoked=0',[$id,$subject]);
             if (!$row) throw new \RuntimeException('security_revoke_rejected');
-            if (str_starts_with($subject,'member:') && count($this->credentials($subject))<=1 && (int)$f['confirmed']!==1) throw new \RuntimeException('security_last_staff_factor_requires_recovery');
+            if (str_starts_with($subject,'member:') && count($this->credentials($subject))<=1 && ((int)$f['confirmed']!==1 || $this->config->staffPasskeyRequired()))
+                throw new \RuntimeException('security_last_staff_factor_requires_recovery');
             $this->db->executeStatement("UPDATE plg_ps_credential SET revoked=1, revoked_at=?, revoked_reason='self_revoke' WHERE id=? AND subject=? AND revoked=0",[$now,$id,$subject]);
             $this->db->executeStatement('UPDATE plg_ps_factor SET generation=generation+1 WHERE subject=?',[$subject]);
             $this->audit($subject,'passkey_revoked_self:'.substr($id,0,16));

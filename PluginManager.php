@@ -29,7 +29,7 @@ final class PluginManager extends AbstractPluginManager
             }
             $path = $_SERVER['TURNSTILE_CONFIG'] ?? $_ENV['TURNSTILE_CONFIG'] ?? getenv('TURNSTILE_CONFIG');
             $path = is_string($path) && $path !== '' ? $path : '/run/eccube-private/passkey/turnstile.json';
-            $gate = (new \Plugin\PasskeySecurity\Resource\Turnstile\Configuration($path))->data();
+            $gate = (new \Plugin\PasskeySecurity\Resource\Turnstile\Configuration($path, $settings, $config))->data();
             if ($gate['enabled'] && $gate['hostname'] !== parse_url($config->origin(), PHP_URL_HOST)) {
                 throw new \RuntimeException('legacy_turnstile_configuration_invalid');
             }

@@ -2,12 +2,18 @@
 declare(strict_types=1);
 namespace Plugin\PasskeySecurity\Resource\Runtime;
 
-use Doctrine\DBAL\Connection;
+use Doctrine\DBAL\{ArrayParameterType, Connection};
 
 /** Public profile metadata only. No host-derived first-visit initialization. */
 final class PublicSettings
 {
     public const STAFF_SESSION_HOURS = [1, 2, 3, 4, 5, 6];
+    public const TURNSTILE_BROWSER_SECONDS = [5, 60, 20];
+    public const TURNSTILE_GATEWAY_SECONDS = [2, 10, 10];
+    private const TURNSTILE_KEY_PARTS = [
+        'turnstile_keys_0', 'turnstile_keys_1', 'turnstile_keys_2', 'turnstile_keys_3',
+        'turnstile_keys_4', 'turnstile_keys_5', 'turnstile_keys_6', 'turnstile_keys_7',
+    ];
 
     public function __construct(private Connection $db) {}
     public function get(string $name): ?string
@@ -36,6 +42,22 @@ final class PublicSettings
         if(!in_array($v,['0','1'],true)||($v==='0'&&$this->migrated()))throw new \RuntimeException('public_policy_invalid');
         return $v==='1';
     }
+    public function staffPasskeyRequired(): bool
+    {
+        $required = $this->get('staff_passkey_required');
+        if (!in_array($required, [null, '0', '1'], true)) {
+            throw new \RuntimeException('public_policy_invalid');
+        }
+        return $required === '1';
+    }
+
+    public function staffWithoutPasskey(): int
+    {
+        $activeStaff = $this->db->fetchFirstColumn('SELECT id FROM dtb_member WHERE work_id=1');
+        $registered = $this->db->fetchFirstColumn("SELECT DISTINCT subject FROM plg_ps_credential WHERE revoked=0 AND subject LIKE 'member:%'");
+        return count(array_diff(array_map(static fn($id): string => 'member:'.$id, $activeStaff), $registered));
+    }
+
     public function migrated(): bool { return $this->get('legacy_identity') !== null; }
 
     public function staffSessionHours(): int
@@ -47,6 +69,40 @@ final class PublicSettings
     private static function validStaffSessionHours(string $hours): bool
     {
         return (string) (int) $hours === $hours && in_array((int) $hours, self::STAFF_SESSION_HOURS, true);
+    }
+
+    public function turnstileTimeouts(): array
+    {
+        return [
+            'browser' => self::timeout($this->get('turnstile_browser_seconds'), self::TURNSTILE_BROWSER_SECONDS),
+            'gateway' => self::timeout($this->get('turnstile_gateway_seconds'), self::TURNSTILE_GATEWAY_SECONDS),
+        ];
+    }
+
+    public static function timeout(?string $value, array $range): int
+    {
+        if ($value === null) {
+            return $range[2];
+        }
+        $seconds = (int) $value;
+        if ((string) $seconds !== $value || $seconds < $range[0] || $seconds > $range[1]) {
+            throw new \DomainException('public_turnstile_timeout_invalid');
+        }
+        return $seconds;
+    }
+
+    public function turnstileKeys(): ?string
+    {
+        $names = array_map(static fn(string $name): string => 'public_'.$name, self::TURNSTILE_KEY_PARTS);
+        $parts = $this->db->fetchFirstColumn('SELECT value FROM plg_ps_meta WHERE name IN (?) ORDER BY name',
+            [$names], [ArrayParameterType::STRING]);
+        if ($parts === []) {
+            return null;
+        }
+        if (count($parts) !== count($names)) {
+            throw new \RuntimeException('turnstile_managed_keys_invalid');
+        }
+        return implode('', $parts);
     }
 
     public function assertInstallable(): bool
@@ -110,15 +166,35 @@ final class PublicSettings
             if(!$store->active())$store->activate([],[]);
         });
     }
-    public function save(string $origin,string $name,bool $required,Store $store,?string $staffSessionHours=null):void
+    public function save(string $origin,string $name,bool $required,Store $store,?string $staffSessionHours=null, ?array $turnstileTimeouts = null,
+        ?string $turnstileKeys = null, ?bool $staffPasskeyRequired = null):void
     {
         if ($staffSessionHours !== null && !self::validStaffSessionHours($staffSessionHours)) {
             throw new \DomainException('public_staff_session_hours_invalid');
         }
-        $this->db->transactional(function()use($origin,$name,$required,$store,$staffSessionHours):void{
+        $this->db->transactional(function()use($origin,$name,$required,$store,$staffSessionHours,$turnstileTimeouts,$turnstileKeys,$staffPasskeyRequired):void{
             $this->configure($origin,$name,$store);$this->requireStaff($required);
             if ($staffSessionHours !== null) {
                 $this->put('staff_session_hours', $staffSessionHours);
+            }
+            if ($staffPasskeyRequired !== null) {
+                if ($staffPasskeyRequired && !$this->staffPasskeyRequired() && $this->staffWithoutPasskey() > 0) {
+                    throw new \RuntimeException('public_staff_passkey_enrollment_required');
+                }
+                $this->put('staff_passkey_required', $staffPasskeyRequired ? '1' : '0');
+            }
+            if ($turnstileKeys !== null) {
+                $parts = str_split($turnstileKeys, 128);
+                if (count($parts) > count(self::TURNSTILE_KEY_PARTS)) {
+                    throw new \RuntimeException('turnstile_managed_keys_invalid');
+                }
+                foreach (self::TURNSTILE_KEY_PARTS as $i => $name) {
+                    $this->put($name, $parts[$i] ?? '');
+                }
+            }
+            if ($turnstileTimeouts !== null) {
+                $this->put('turnstile_browser_seconds', (string) self::timeout((string) $turnstileTimeouts['browser'], self::TURNSTILE_BROWSER_SECONDS));
+                $this->put('turnstile_gateway_seconds', (string) self::timeout((string) $turnstileTimeouts['gateway'], self::TURNSTILE_GATEWAY_SECONDS));
             }
         });
     }

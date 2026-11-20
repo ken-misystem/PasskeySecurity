@@ -1,6 +1,8 @@
 (() => {
  'use strict';
  const states=[],records=new WeakMap(),nativeSubmit=HTMLFormElement.prototype.submit;
+ const script=document.getElementById('ps-turnstile-script');
+ const formWait=(Number(script.dataset.formWaitSeconds)||20)*1000;
  const fail='安全確認が完了しません。表示されたチェック、通信環境を確認して、もう一度お試しください。';
  function message(s,text){const status=s.box.querySelector('.ps-turnstile-status');status.textContent=text;status.hidden=s.box.dataset.appearance==='interaction-only'&&!/操作が必要|完了しません|接続できません|読み込めません/.test(text);}
  function reset(s){s.token='';message(s,'送信前の安全確認を進めています。必要な場合だけチェックが表示されます。');if(s.id!==null)turnstile.reset(s.id);}
@@ -16,7 +18,7 @@
    if(s.pending){reject(new Error('安全確認中です。しばらくお待ちください。'));return;}
    message(s,'送信前の安全確認を進めています。必要な場合はチェックしてください。');
    const waiter={resolve,reject,timer:null};s.pending=waiter;
-   waiter.timer=setTimeout(()=>{if(s.pending===waiter){s.pending=null;message(s,fail);reject(new Error(fail));}},20000);
+   waiter.timer=setTimeout(()=>{if(s.pending===waiter){s.pending=null;message(s,fail);reject(new Error(fail));}},formWait);
   });
   s.token='';message(s,'安全確認済みです。この操作を送信しています。');if(refresh)reset(s);return token;
  }
@@ -65,7 +67,7 @@
    'error-callback':()=>{s.token='';message(s,'安全確認に接続できません。通信環境を確認して再読み込みしてください。');if(s.pending){const p=s.pending;s.pending=null;clearTimeout(p.timer);p.reject(new Error('安全確認に接続できません。'));}return true;}
   });
  });
- const script=document.getElementById('ps-turnstile-script'),customerPath=script.dataset.checkoutCustomer;
+ const customerPath=script.dataset.checkoutCustomer;
  if(customerPath&&window.jQuery)window.jQuery.ajaxPrefilter((options,original,xhr)=>{
   const url=new URL(options.url,location.href);
   if(url.origin!==location.origin||url.pathname!==new URL(customerPath,location.href).pathname||String(options.type).toUpperCase()!=='POST')return;

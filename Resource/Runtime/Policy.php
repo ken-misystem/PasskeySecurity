@@ -94,6 +94,16 @@ final class Policy
             || ((int)$factor['confirmed']===1 && $this->fresh($s,$user,'password',$now,$ttl) && $this->fresh($s,$user,'totp',$now,$ttl)
         );
     }
+    public function staffAccess(SessionInterface $session, Member $user, int $now): bool
+    {
+        if (!$this->config->staffPasskeyRequired()) {
+            return $this->complete($session, $user, $now);
+        }
+        $subject = self::subject($user);
+        return !$this->store->resetRequired($subject) && $this->store->credentials($subject) !== []
+            && $this->fresh($session, $user, 'passkey', $now, $this->config->staffSessionTtl());
+    }
+
     public function staffProof(SessionInterface $s, object $user, int $now, int $ttl=300): string
     {
         if (!($user instanceof Member) || !$this->complete($s,$user,$now)) throw new \RuntimeException('security_staff_authentication_required');

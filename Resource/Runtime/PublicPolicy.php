@@ -16,7 +16,7 @@ final class PublicPolicy
     }
     public function mustAuthenticate(object $u):bool
     {
-        return $u instanceof Member&&($this->enrolled($u)||$this->settings->required()
+        return $u instanceof Member&&($this->enrolled($u)||$this->settings->required()||$this->settings->staffPasskeyRequired()
             ||$this->store->resetRequired(Policy::subject($u)));
     }
     public function enrollment(SessionInterface $session,object $u,int $now):int

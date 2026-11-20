@@ -8,7 +8,7 @@ use Eccube\Entity\Member;
 use Eccube\Entity\Master\CustomerStatus;
 use Eccube\Entity\Master\Work;
 use Doctrine\ORM\EntityManagerInterface;
-use Plugin\PasskeySecurity\Resource\Runtime\{Config, Store, Policy, Ceremony, StaffMailStore, PasswordRules};
+use Plugin\PasskeySecurity\Resource\Runtime\{Config, Store, Policy, SettingsContinuation, Ceremony, StaffMailStore, PasswordRules};
 use Symfony\Component\HttpFoundation\{Request, Response, JsonResponse};
 use Symfony\Component\PasswordHasher\Hasher\UserPasswordHasherInterface;
 use Symfony\Component\Security\Http\Authentication\UserAuthenticatorInterface;
@@ -73,7 +73,12 @@ final class LegacySecurityController extends AbstractController
                         foreach($headers as$k=>$v)$response->headers->set($k,$v);return $response;
                     }
                 }
-                $staffReturn=$u instanceof Member&&$this->staffReturnId($r,$u)!==null;
+                $pendingSettings = $u instanceof Member ? SettingsContinuation::pending($r, $u, $this->policy) : null;
+                $settingsReturn = $pendingSettings !== null;
+                $passkeyRequired = $kind === 'member' && $this->config->staffPasskeyRequired();
+                $settingsPasskey = $settingsReturn && ($passkeyRequired || ($pendingSettings['settings']['passkey_required'] ?? false));
+                $staffReturn=($settingsReturn && (!$passkeyRequired || $active > 0 || !$complete))
+                    ||($u instanceof Member&&$this->staffReturnId($r,$u)!==null);
                 $r->attributes->set('_ps_security_login',!$same || (!$complete&&!$enrollmentReady));
                 $primary=!$same?'login-passkey':($staffReturn?($active>0?'verify':'totp-verify'):
                     ($u instanceof Customer||$complete?'register':($active>0?'verify':($hasTotp?'totp-verify':
@@ -83,7 +88,8 @@ final class LegacySecurityController extends AbstractController
                 $response = $this->render('@PasskeySecurity/security.twig', ['kind'=>$kind, 'signed_in'=>$same,
                     'staff_initial'=>$initial,'initial_retry_required'=>$registrationInterrupted&&$this->store->initialEligible($subject),'enrollment_expires'=>$enrollmentReady?(int)$r->getSession()->get('ps_enroll')['at']+600:0,'initial_resume_required'=>$initial&&!$enrollmentReady&&!$this->store->initialEligible($subject),'staff_password_recent'=>$same&&$u instanceof Member&&$this->policy->fresh($r->getSession(),$u,'password',time(),1800),'reset_required'=>$same && $u instanceof Member && $this->store->resetRequired($subject),
                     'nonce'=>$nonce, 'complete'=>$same && $this->policy->complete($r->getSession(), $u, time()),
-                    'staff_return'=>$u instanceof Member&&$this->staffReturnId($r,$u)!==null,
+                    'staff_return'=>$staffReturn, 'settings_return'=>$settingsReturn,
+                    'staff_passkey_required'=>$passkeyRequired, 'settings_passkey'=>$settingsPasskey,
                     'totp_password_required'=>$same&&$u instanceof Member&&!$this->policy->fresh($r->getSession(),$u,'password',time(),$staffReturn?300:1800),
                     'enrollment_ready'=>$same&&$u instanceof Member&&$this->policy->fresh($r->getSession(),$u,'enroll',time(),600),
                     'endpoint'=>$r->getPathInfo(), 'login_url'=>$this->generateUrl($kind === 'member'?'admin_login':'mypage_login'),
@@ -155,7 +161,7 @@ final class LegacySecurityController extends AbstractController
             $this->policy->prove($s, $u, 'passkey', $now,$verified['generation']);
             if ($u instanceof Customer) $this->policy->prove($s,$u,'session',$now,$verified['generation']);
             if($u instanceof Member)$this->completeStaff($r,$u,$now,$verified['generation']);
-            return ['ok'=>true, 'redirect'=>$this->generateUrl($kind === 'member'?'admin_homepage':'mypage')];
+            return ['ok'=>true, 'redirect'=>$u instanceof Member?$this->staffDestination($r,$u):$this->generateUrl('mypage')];
         }
         $u = $this->user($kind); $subject = Policy::subject($u);
         $group=match($a){'reauth','change_password'=>'password','verify_totp'=>'totp','claim_ticket'=>'ticket',default=>'credential'};
@@ -217,7 +223,12 @@ final class LegacySecurityController extends AbstractController
         if ($a === 'register_verify') {
             $this->allowedEnrollment($r, $u); $generation=$this->ceremony->register($s, $kind, $subject, $i, $now);
             $this->policy->prove($s, $u, 'passkey', $now,$generation);
-            if($u instanceof Member)$this->completeStaff($r,$u,$now,$generation);
+            if($u instanceof Member){
+                $this->completeStaff($r,$u,$now,$generation);
+                if (SettingsContinuation::pending($r, $u, $this->policy) !== null) {
+                    return ['ok'=>true, 'redirect'=>$this->staffDestination($r,$u)];
+                }
+            }
             return ['ok'=>true,'redirect'=>$r->getPathInfo()];
         }
         if ($a === 'verify_options' && $u instanceof Member) {
@@ -253,7 +264,7 @@ final class LegacySecurityController extends AbstractController
                 if(!$this->hasher->isPasswordValid($u,$i['password']))throw new \RuntimeException('security_reauth_rejected');
                 $this->policy->prove($s,$u,'password',$now,$this->store->generation($subject));
             }
-            $generation=$this->policy->proofGeneration($s,$u,'password',$now,$this->staffReturnId($r,$u)!==null?300:1800);
+            $generation=$this->policy->proofGeneration($s,$u,'password',$now,($this->staffReturnId($r,$u)!==null||SettingsContinuation::pending($r,$u,$this->policy)!==null)?300:1800);
             $verified=$this->store->consumeTotp($subject, (string)($i['code'] ?? ''), $now,$generation);
             $this->policy->prove($s, $u, 'totp', $now,$verified);
             $this->completeStaff($r,$u,$now,$verified);$s->migrate(true);
@@ -286,6 +297,16 @@ final class LegacySecurityController extends AbstractController
     }
     private function staffDestination(Request $r,Member $u): string
     {
+        $pending = SettingsContinuation::pending($r, $u, $this->policy);
+        $passkeyRequired = $this->config->staffPasskeyRequired();
+        if (($passkeyRequired && !$this->policy->staffAccess($r->getSession(), $u, time()))
+            || ($pending !== null && ($passkeyRequired || ($pending['settings']['passkey_required'] ?? false))
+                && !$this->policy->fresh($r->getSession(), $u, 'passkey', time(), 300))) {
+            return $this->generateUrl('ps_member');
+        }
+        if ($pending !== null) {
+            return $this->generateUrl(SettingsContinuation::ROUTE, ['resume' => '1']);
+        }
         $id=$this->staffReturnId($r,$u);$r->getSession()->remove('ps_staff_mail_return');
         return $id===null?$this->generateUrl('admin_homepage'):($id===0?$this->generateUrl('ps_staff_email_manage'):$this->generateUrl('admin_ps_staff_mail',['id'=>$id]));
     }

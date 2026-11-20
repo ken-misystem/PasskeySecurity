@@ -64,6 +64,8 @@ final class PublicSubscriber implements EventSubscriberInterface
         if(!$this->settings->ready())return; // Fresh install leaves native store/login untouched.
         if(!($u instanceof Customer)&&!($u instanceof Member))return;
         $route=$r->attributes->get('_route');
+        // The settings controller checks authorization and resumes its own MFA-protected operation.
+        if ($route === 'passkey_security_admin_config' && $u instanceof Member) return;
         if(in_array($route,['ps_customer','ps_member','logout','admin_logout','admin_login'],true))return;
         if($u instanceof Customer){
             $reset=$this->store->resetRequired(Policy::subject($u));
@@ -72,7 +74,7 @@ final class PublicSubscriber implements EventSubscriberInterface
         }else{
             try{
                 if(!$this->publicPolicy->mustAuthenticate($u))return;
-                if($r->hasSession()&&$this->policy->complete($r->getSession(),$u,time()))return;
+                if($r->hasSession()&&$this->policy->staffAccess($r->getSession(),$u,time()))return;
                 // EC-CUBE checks native 2FA after this listener, including on ps_member.
                 if(($route==='admin_two_factor_auth'||($route==='admin_two_factor_auth_set'&&!$u->getTwoFactorAuthKey()))
                     &&$u->isTwoFactorAuthEnabled()&&$this->twoFactorAuth->isEnabled()&&!$this->twoFactorAuth->isAuth($u))return;

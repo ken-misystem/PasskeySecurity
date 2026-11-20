@@ -27,6 +27,7 @@ final class Config
     public function key():string{return $this->data()['key'];}
     public function origin():string{return $this->data()['origin'];}
     public function staffSessionTtl(): int { return $this->settings->staffSessionHours() * 3600; }
+    public function staffPasskeyRequired(): bool { return $this->settings->staffPasskeyRequired(); }
     public function usesLegacyIdentity(): bool { return $this->settings->migrated(); }
     public static function supportsShopEdition(string $edition): bool
     {

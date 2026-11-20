@@ -27,7 +27,7 @@
 {% if not signed_in %}<button type="button" id="login-passkey">パスキーでログイン</button>
 {% else %}
 {% if active_count > 0 %}<button type="button" id="verify">本人確認して管理画面へ</button>{% endif %}
-{% if has_totp %}<button type="button" id="totp-verify"{% if active_count > 0 %} hidden{% endif %}>コードを確認して管理画面へ</button>{% endif %}
+{% if has_totp %}<button type="button" id="totp-verify"{% if active_count > 0 %} hidden{% endif %}>{{ staff_passkey_required|default(false) ? '認証アプリのコードを確認する' : 'コードを確認して管理画面へ' }}</button>{% endif %}
 {% endif %}
 </div>
 <p id="status" class="status" role="status" aria-live="polite" tabindex="-1"></p>
@@ -35,7 +35,7 @@
 <nav class="staff-login-nav" aria-label="ログインのご案内"><a class="button" href="{{ path('ps_staff_initial_request') }}">初回登録リンク・コードを依頼する</a><a id="security-back" href="{{ login_url }}">ID・パスワードの入力へ</a><a href="{{ path('ps_staff_password_reset') }}">パスワードをお忘れの方</a></nav>
 {% if not signed_in %}<p class="staff-login-password-link">パスキーを登録していない方は、<a href="{{ login_url }}">ID・パスワードでログイン</a>してください。</p>{% endif %}
 <details class="staff-login-help"><summary>ヘルプ：ログインでお困りの方</summary><div class="help-body"><ul>
-<li>パスキーか、パスワード＋認証アプリのどちらかでログインします。毎回両方を使う必要はありません。</li>
+<li>{% if staff_passkey_required|default(false) %}管理画面に入るにはパスキーが必要です。認証アプリで本人確認して、パスキーの登録を進められます。{% else %}パスキーか、パスワード＋認証アプリのどちらかでログインします。毎回両方を使う必要はありません。{% endif %}</li>
 <li>アプリのコードが通らない場合は、数字が切り替わるのを待ち、スマートフォンの日時を自動設定にしてください。</li><li>端末の追加・設定変更は、管理画面にログインしてから行えます。</li>
 <li>初めての方は、まずID・パスワードを入力し、次の画面で初回登録コードを使って登録してください。認証アプリが登録済みなら、初回登録コードは不要です。</li>
 <li>パスキーと認証アプリをすべて紛失した場合は、管理担当者へ復旧を依頼してください。メールだけでは追加認証は解除されません。</li>

@@ -99,6 +99,8 @@ final class SecuritySubscriber implements EventSubscriberInterface
         $u = $this->tokens->getToken()?->getUser();
         if (!($u instanceof Member) && !($u instanceof Customer)) return;
         $route = $r->attributes->get('_route');
+        // The settings controller checks authorization and resumes its own MFA-protected operation.
+        if ($route === 'passkey_security_admin_config' && $u instanceof Member) return;
         // Authentication entry only: allow the native password form, never admin content.
         // StaffPasswordLoginSubscriber renders it without the core's signed-in redirect.
         if ($u instanceof Member && $route === 'admin_login'
@@ -107,7 +109,10 @@ final class SecuritySubscriber implements EventSubscriberInterface
         if ($u instanceof Member
             && ($route === 'admin_two_factor_auth' || ($route === 'admin_two_factor_auth_set' && !$u->getTwoFactorAuthKey()))
             && $u->isTwoFactorAuthEnabled() && $this->twoFactorAuth->isEnabled() && !$this->twoFactorAuth->isAuth($u)) return;
-        if (!$r->hasSession() || !$this->policy->complete($r->getSession(), $u, time())) {
+        $complete = $r->hasSession() && ($u instanceof Member
+            ? $this->policy->staffAccess($r->getSession(), $u, time())
+            : $this->policy->complete($r->getSession(), $u, time()));
+        if (!$complete) {
             if ($u instanceof Customer) {
                 $this->tokens->setToken(null);
                 if ($r->hasSession()) $r->getSession()->invalidate();

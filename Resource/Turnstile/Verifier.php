@@ -7,6 +7,11 @@ final class Verifier
     public function check(mixed $token,string $action):bool
     {
         $c=$this->config->data();if(!$c['enabled'])return true;
+        return $this->verifyKeys($c, $token, $action);
+    }
+
+    public function verifyKeys(array $c, mixed $token, string $action): bool
+    {
         if(!is_string($token)||$token===''||strlen($token)>2048||preg_match('/[\x00-\x20\x7f]/',$token))return false;
         try{
             $d=$this->gateway->verify($c['secret_key'],$token);
