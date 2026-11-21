@@ -84,3 +84,5 @@ TOTP等の暗号鍵は、既存のECCUBE_AUTH_MAGICとプラグインDB内のラ
 PasskeySecurityはGitHub Releasesで無料配布する方針です。開発・保守への支援は任意で、支援の有無にかかわらず同じ配布物を利用できます。
 
 PasskeySecurity本体は[MITライセンス](LICENSE)で提供します。同梱ライブラリの著作権表示とライセンスは `Resource/dependencies/` に収録しています。
+
+開発・保守への支援は、[GitHub Sponsors（Yaruani）](https://github.com/sponsors/Yaruani)で受け付けています。
